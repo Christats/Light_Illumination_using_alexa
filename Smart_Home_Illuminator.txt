@@ -1,0 +1,96 @@
+#ifdef ENABLE_DEBUG
+  #define DEBUG_ESP_PORT Serial
+  #define NODEBUG_WEBSOCKETS
+  #define NDEBUG
+#endif 
+
+#include <Arduino.h>
+#if defined(ESP8266)
+  #include <ESP8266WiFi.h>
+#elif defined(ESP32) || defined(ARDUINO_ARCH_RP2040)
+  #include <WiFi.h>
+#endif
+
+#include <SinricPro.h>
+#include <SinricProSwitch.h>
+
+#if defined(ESP8266)
+  #define RELAYPIN_1 D0
+  #define RELAYPIN_2 D1
+  #define RELAYPIN_3 D2
+#endif
+struct RelayInfo {
+  String deviceId;
+  String name;
+  int pin;
+};
+
+std::vector<RelayInfo> relays = {
+    {" ", "Relay 1", RELAYPIN_1},//past device id from the sinric pro
+    {" ", "Relay 2", RELAYPIN_2},//past device id from the sinric pro
+    {" ", "Relay 3", RELAYPIN_3}};//past device id from the sinric pro
+
+
+#define WIFI_SSID  " "// past the SSID
+#define WIFI_PASS  " "//past pasword
+#define APP_KEY    " "    // Should look like "de0bxxxx-1x3x-4x3x-ax2x-5dabxxxxxxxx" from sinric pro
+#define APP_SECRET " " // Should look like "5f36xxxx-x3x7-4x3x-xexe-e86724a9xxxx-4c4axxxx-3x3x-x5xe-x9x3-333d65xxxxxx" from sinric pro
+
+#define BAUD_RATE  115200              // Change baudrate to your need
+
+bool onPowerState(const String &deviceId, bool &state) {
+  for (auto &relay : relays) {                                                            // for each relay configuration
+    if (deviceId == relay.deviceId) {                                                       // check if deviceId matches
+      Serial.printf("Device %s turned %s\r\n", relay.name.c_str(), state ? "on" : "off");     // print relay name and state to serial
+      digitalWrite(relay.pin, !state);                                                         // set state to digital pin / gpio
+      return true;                                                                            // return with success true
+    }
+  }
+  return false; // if no relay configuration was found, return false
+}
+
+void setupRelayPins() {
+  for (auto &relay : relays) {    // for each relay configuration
+    pinMode(relay.pin, OUTPUT);     // set pinMode to OUTPUT
+  }
+}
+
+void setupWiFi() {
+  Serial.printf("\r\n[Wifi]: Connecting");
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  #if defined(ESP8266)
+    WiFi.setSleepMode(WIFI_NONE_SLEEP); 
+  #elif defined(ESP32)
+    WiFi.setSleep(false); 
+  #endif
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.printf(".");
+    delay(250);
+  }
+  Serial.printf("connected!\r\n[WiFi]: IP-Address is %s\r\n", WiFi.localIP().toString().c_str());
+}
+
+void setupSinricPro() {
+  for (auto &relay : relays) {                             // for each relay configuration
+    SinricProSwitch &mySwitch = SinricPro[relay.deviceId];   // create a new device with deviceId from relay configuration
+    mySwitch.onPowerState(onPowerState);                     // attach onPowerState callback to the new device
+  }
+
+  SinricPro.onConnected([]() { Serial.printf("Connected to SinricPro\r\n"); });
+  SinricPro.onDisconnected([]() { Serial.printf("Disconnected from SinricPro\r\n"); });
+
+  SinricPro.begin(APP_KEY, APP_SECRET);
+}
+
+void setup() {
+  Serial.begin(BAUD_RATE);
+  setupRelayPins();
+  setupWiFi();
+  setupSinricPro();
+}
+
+void loop() {
+  SinricPro.handle();
+}
